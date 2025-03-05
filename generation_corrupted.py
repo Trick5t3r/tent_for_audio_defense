@@ -4,6 +4,8 @@ import torch
 import numpy as np
 from IPython.display import Audio
 import os
+import soundfile as sf
+
 
 
 # Loading the model from torchaudio model hub
@@ -87,6 +89,38 @@ def transcription(liste):
         res.append(attack.INFER(torch.from_numpy(x)).replace("|"," "))
     return res
 
+
+def attacks_sur_un_fichier(path:str,target_transcription:str,early_stop:bool=True):
+
+    input_audio, sample_rate = torchaudio.load(path)
+    target = list(target_transcription.upper().replace(" ", "|"))
+
+    res1=attack.FGSM_ATTACK(input_audio, target, epsilon = 0.01, targeted = True)
+    res2=attack.BIM_ATTACK(input_audio, target, epsilon = 0.0015, alpha = 0.00009,num_iter = 3000, targeted = True, early_stop = early_stop)
+    res3=attack.PGD_ATTACK(input_audio, target, epsilon = 0.0015, alpha = 0.00009,num_iter = 2500, targeted = True, early_stop = early_stop)
+    res4=attack.CW_ATTACK(input_audio, target, epsilon = 0.0015, c = 10,
+        learning_rate = 0.00001, num_iter = 10000, decrease_factor_eps = 1,
+        num_iter_decrease_eps = 10, optimizer = None, nested = True,
+        early_stop = early_stop, search_eps = False, targeted = True)
+    res5=attack.IMPERCEPTIBLE_ATTACK(torch.nn.functional.pad(input_audio, (0, 1000)), target, epsilon = 0.015, c = 10, learning_rate1 = 0.001,
+                            learning_rate2 = 0.0001, num_iter1 = 1000, num_iter2 = 15000, decrease_factor_eps = 1,
+                            num_iter_decrease_eps = 10, optimizer1 = None, optimizer2 = "Adam",nested = True ,
+                            early_stop_cw = early_stop, search_eps_cw = False, alpha = 0.05)
+    
+    # Chemin de destination pour le fichier .wav
+    destination1 =os.path.splitext(os.path.basename(path))[0] + "_corrupted_" + 'FGSM_ATTACK' + '.wav'
+    destination2 =os.path.splitext(os.path.basename(path))[0] + "_corrupted_" + 'BIM_ATTACK' + '.wav'
+    destination3 =os.path.splitext(os.path.basename(path))[0] + "_corrupted_" + 'PGD_ATTACK' + '.wav'
+    destination4 =os.path.splitext(os.path.basename(path))[0] + "_corrupted_" + 'CW_ATTACK' + '.wav'
+    destination5 =os.path.splitext(os.path.basename(path))[0] + "_corrupted_" + 'IMPERCEPTIBLE_ATTACK' + '.wav'
+
+    sf.write(destination1, res1[0], sample_rate)
+    sf.write(destination2, res2[0], sample_rate)
+    sf.write(destination3, res3[0], sample_rate)
+    sf.write(destination4, res4[0], sample_rate)
+    sf.write(destination5, res5[0], sample_rate)
+
+    print(f"Fichiers audios enregistrés")
 
 if __name__=="__main__":
     path_dossier= 'adversarial_dataset-B/Normal-Examples/down/dataset_dir/down'
