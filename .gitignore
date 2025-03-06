@@ -6,4 +6,5 @@ src/__pycache__/
 notebooks/.ipynb_checkpoints/
 outputs/
 Data/speech_commands/
-
+logs/
+Data/speech_commands_v0.01.tar.gz
