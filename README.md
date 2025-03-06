@@ -20,9 +20,14 @@ https://github.com/hammaad2002/ASRAdversarialAttacks.git
 #### Pour télécharger le dataset:
 http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
 
-Puis de-zipper le fichier et le mettre dans le fichier Data
+Puis de-zipper le fichier et le mettre dans le dossier Data
 
 
 
 ```bash
 pip install -r requirements.txt
+```
+
+```bash
+git clone https://github.com/DequanWang/dent.git
+```
