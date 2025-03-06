@@ -107,6 +107,35 @@ Pour utiliser la méthode de tent qui prend en entrée des images, les audios so
 
 (Pas encore dans le github) Des exemples sont fournis pour tester des attaques.
 
+## 🧠 Architecture du Modèle
+
+Le modèle CNN est composé des éléments suivants :
+
+### Prétraitement
+- Transformation en spectrogramme mel avec les paramètres :
+  - Taux d'échantillonnage : 16000 Hz
+  - Nombre de bandes mel : 40
+  - Taille FFT : 512
+  - Longueur du hop : 160
+  - Fréquences : 40 Hz - 8000 Hz
+
+### Architecture CNN
+1. **Blocs Convolutionnels** :
+   - 6 couches de convolution (Conv2d) avec ReLU et BatchNorm
+   - 3 couches de pooling (MaxPool2d)
+   - Progression des canaux : 1 → 16 → 32 → 64
+
+2. **Couches Denses** :
+   - Couche d'aplatissement (Flatten)
+   - Couche dense de 256 neurones avec ReLU
+   - Dropout (0.5)
+   - Couche de sortie (num_classes)
+
+### Post-traitement
+- Conversion en log-mel spectrogramme
+- Normalisation des valeurs entre -10.0 et 5.0
+- Mise à l'échelle : (x + 2.5) / 7.5
+
 ## Installation 
 #### Téléchargement du dataset:
 http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
