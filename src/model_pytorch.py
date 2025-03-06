@@ -6,6 +6,9 @@ import torch.nn as nn
 from pathlib import Path
 from genc import genc_model
 
+import torchaudio
+from torchaudio.transforms import MelSpectrogram
+
 class Conv2dBlock(nn.Module):
     def __init__(self, in_channels, out_channels, use_batch_norm=True):
         super().__init__()
@@ -24,7 +27,7 @@ class CNN(nn.Module):
         super().__init__()
         self.use_batch_norm = batch_norm
         self.ds_type = ds_type
-        
+
         if ds_type == 'samples':
             self.genc = genc_model(dim_z=40)
             if load_genc:
@@ -32,12 +35,20 @@ class CNN(nn.Module):
             if not train_genc:
                 for param in self.genc.parameters():
                     param.requires_grad = False
-            
+
             self.reshape = lambda x: x.view(-1, 1, 40, x.size(1))
             self.crop = lambda x: x[:, :, 5:, :]
             in_channels = 1
         else:
             in_channels = 1
+
+        # Add MelSpectrogram transformation
+        self.mel_spectrogram = MelSpectrogram(
+            sample_rate=16000,  # Adjust based on your audio data
+            n_mels=40,          # Number of Mel filterbanks
+            n_fft=400,          # Size of FFT
+            hop_length=160      # Length of hop between STFT windows
+        )
 
         # Architecture CNN
         self.conv1 = Conv2dBlock(in_channels, 16, self.use_batch_norm)
@@ -55,7 +66,11 @@ class CNN(nn.Module):
             x = self.genc(x)
             x = self.reshape(x)
             x = self.crop(x)
-        
+        else:
+            # Apply MelSpectrogram transformation
+            x = self.mel_spectrogram(x)
+            x = x.unsqueeze(1)  # Add channel dimension
+
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.pool1(x)

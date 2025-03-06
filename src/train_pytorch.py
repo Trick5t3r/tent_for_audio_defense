@@ -205,7 +205,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--epochs', type=int, default=25)
     parser.add_argument('-b', '--batch_sz', type=int, default=64)
     parser.add_argument('--data_dir', type=str, 
-                       default=str(Path("..") / 'Data' / 'speech_commands' / 'tfrecords'))
+                       default=str(Path("..") / 'Data' / 'speech_commands'))
     parser.add_argument('-ds', '--ds_type', type=str, default='log-mel')
     parser.add_argument('--optimizer', type=str, default='adam')
     parser.add_argument('-bn', '--batch_norm', type=int, default=1)
