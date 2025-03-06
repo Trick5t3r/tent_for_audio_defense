@@ -1,0 +1,9 @@
+.idea/
+.DS_Store
+src.egg-info/
+src/.ipynb_checkpoints/
+src/__pycache__/
+notebooks/.ipynb_checkpoints/
+outputs/
+Data/speech_commands/
+
