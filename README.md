@@ -43,11 +43,6 @@ http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
 
 Puis de-zipper le fichier et le mettre dans le dossier Data
 
-#### Installation des packages
-```bash
-pip install -r requirements.txt
-```
-
 
 ## 📁 Structure du Projet
 
