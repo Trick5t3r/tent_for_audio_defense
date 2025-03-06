@@ -35,6 +35,19 @@ source .venv/bin/activate  # Sur Linux/Mac
 ```bash
 pip install -r requirements.txt
 ```
+```bash
+git clone https://github.com/DequanWang/dent.git
+```
+4. Téléchargement du dataset :
+http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
+
+Puis de-zipper le fichier et le mettre dans le dossier Data
+
+#### Installation des packages
+```bash
+pip install -r requirements.txt
+```
+
 
 ## 📁 Structure du Projet
 
@@ -135,21 +148,6 @@ Le modèle CNN est composé des éléments suivants :
 - Conversion en log-mel spectrogramme
 - Normalisation des valeurs entre -10.0 et 5.0
 - Mise à l'échelle : (x + 2.5) / 7.5
-
-## Installation 
-#### Téléchargement du dataset:
-http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
-
-Puis de-zipper le fichier et le mettre dans le dossier Data
-
-#### Installation des packages
-```bash
-pip install -r requirements.txt
-```
-
-```bash
-git clone https://github.com/DequanWang/dent.git
-```
 
 ## Sources
 https://github.com/dataflowr/Project-Tent-Test-Time-Domain-Adaptation?tab=readme-ov-file
