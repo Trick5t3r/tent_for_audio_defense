@@ -107,7 +107,7 @@ def main(
     momentum=0.9,
     epochs=25,
     batch_sz=64,
-    data_dir=str(Path.home() / 'Data' / 'speech_commands' / 'tfrecords'),
+    data_dir=str(Path("..") / 'Data' / 'speech_commands' / 'tfrecords'),
     ds_type='log-mel',
     optimizer='adam',
     batch_norm=1,
@@ -205,7 +205,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--epochs', type=int, default=25)
     parser.add_argument('-b', '--batch_sz', type=int, default=64)
     parser.add_argument('--data_dir', type=str, 
-                       default=str(Path("C:/Users/Maxence/Documents/PA-MAP/EA - Deep Learning/Projet/speech-command") / 'Data' / 'speech_commands' / 'tfrecords'))
+                       default=str(Path("..") / 'Data' / 'speech_commands' / 'tfrecords'))
     parser.add_argument('-ds', '--ds_type', type=str, default='log-mel')
     parser.add_argument('--optimizer', type=str, default='adam')
     parser.add_argument('-bn', '--batch_norm', type=int, default=1)

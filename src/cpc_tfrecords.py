@@ -61,11 +61,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Build TFRecords dataset.')
     parser.add_argument(
         '--data_dir', type=str,
-        help='Path to training data (default = ~/Data/speech_commands_v0.01).',
-        default=str(Path.home() / 'Data' / 'speech_commands' / 'tfrecords'))
+        help='Path to training data (default = ../Data/speech_commands_v0.01).',
+        default=str(Path("..") / 'Data' / 'speech_commands' / 'tfrecords'))
     parser.add_argument(
         '--output_dir', type=str,
-        help='Path to training data (default = ~/Data/speech_commands_v0.01).',
-        default=str(Path.home() / 'Data' / 'speech_commands' / 'tfrecords'))
+        help='Path to training data (default = ../Data/speech_commands_v0.01).',
+        default=str(Path("..") / 'Data' / 'speech_commands' / 'tfrecords'))
 
     main(vars(parser.parse_args()))
