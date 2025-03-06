@@ -7,3 +7,6 @@ notebooks/.ipynb_checkpoints/
 Data/speech_commands/
 logs/
 Data/speech_commands_v0.01.tar.gz
+Data/speech_commands_v0.01/
+.venv/
+.vscode/

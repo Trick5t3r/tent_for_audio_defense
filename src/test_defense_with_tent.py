@@ -1,16 +1,13 @@
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torchaudio
 import torch
-import numpy as np
-from IPython.display import Audio
-import os
-import soundfile as sf
-#from AdversarialAttacks import ASRAttacks
-from dent import Dent
-from conf import cfg, load_cfg_fom_args
+from dent.dent import Dent
+
+from dent.conf import cfg
 import logging
-import os.path as osp
-import sys
-import torch.nn as nn
 from model_pytorch import CNN
 
 logger = logging.getLogger(__name__)
@@ -133,7 +130,7 @@ def evaluate(input_audio, target, dent_on=False, num_iter=500):
         num_iter: Nombre d'itérations pour l'attaque
     """
     # Configuration par défaut
-    cfg.merge_from_file("tent_for_audio_defense/configs/dent.yaml")
+    cfg.merge_from_file("dent/cfgs/dent.yaml")
     cfg.merge_from_list([
         "TEST.BATCH_SIZE", "128",
         "MODEL.ADAPTATION", "dent",
@@ -254,7 +251,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     
     # Exemple d'utilisation
-    test_file = "tent_for_audio_defense/Data/speech_commands_v0.01/down/00b01445_nohash_0.wav"
+    test_file = "down.wav"
     target_transcription = "up"
     
     print("Test sans DENT...")
