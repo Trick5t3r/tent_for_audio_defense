@@ -32,4 +32,3 @@ tqdm==4.67.1
 typing_extensions==4.12.2
 Werkzeug==3.1.3
 yacs==0.1.8
-git+https://github.com/DequanWang/dent.git
