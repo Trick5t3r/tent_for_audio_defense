@@ -217,7 +217,7 @@ def evaluate(input_audio, target, dent_on=False, num_iter=500):
             raise ValueError("L'attaque n'a pas réussi à générer un résultat")
 
         # Sauvegarder le résultat
-        output_filename = f"result_tent_{'on' if dent_on else 'off'}.wav"
+        output_filename = f"./output/audio_files/result_tent_{'on' if dent_on else 'off'}.wav"
         if torch.is_tensor(res):
             res = res.detach().cpu()
         
