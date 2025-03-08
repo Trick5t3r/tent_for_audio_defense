@@ -68,6 +68,91 @@ class ASRAttacks:
 
         return audio.cpu()
 
+    
+    def CW_ATTACK(self, audio, target, c=1.0, kappa=0, num_iter=500, learning_rate=0.001, targeted=True, early_stop=True):
+        """
+        Perform the Carlini-Wagner (CW) attack.
+
+        Args:
+            audio (torch.Tensor): Input audio tensor.
+            target (list): Target transcription.
+            c (float): Trade-off constant between perturbation norm and attack objective.
+            kappa (float): Confidence parameter. Higher values enforce stronger misclassification.
+            num_iter (int): Number of optimization iterations.
+            learning_rate (float): Learning rate for gradient descent.
+            targeted (bool): Whether the attack is targeted.
+            early_stop (bool): Whether to stop early if the attack succeeds.
+
+        Returns:
+            torch.Tensor: Adversarial audio tensor.
+        """
+        # Move audio to device and clone original input.
+        audio = audio.to(self.device)
+        original_audio = audio.clone()
+        
+        # Convert target transcription to a label index.
+        target_tensor = torch.tensor([self.labels.index(t) for t in target], device=self.device)
+        target_label = target_tensor.item()  # Assume single target for now.
+
+        # Initialize the perturbation delta (starting at zero).
+        delta = torch.zeros_like(audio, requires_grad=True)
+        
+        # Use an optimizer to update delta.
+        optimizer = torch.optim.Adam([delta], lr=learning_rate)
+        
+        for i in range(num_iter):
+            optimizer.zero_grad()
+            
+            # Create the adversarial example and ensure it stays within valid bounds.
+            adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
+            
+            # Obtain the logits from the model.
+            logits = self.model(adv_audio)
+            # Squeeze extra dimensions if needed (assume single sample).
+            if logits.dim() > 1:
+                logits = logits.squeeze(0)
+            
+            # For CW, define the attack loss term f. For a targeted attack, we want the target logit 
+            # to be higher than all others by a margin. For an untargeted attack, we want the target logit 
+            # to fall behind the highest non-target logit.
+            target_logit = logits[target_label]
+            # Exclude the target class from the others.
+            other_logits = torch.cat([logits[:target_label], logits[target_label+1:]])
+            max_other_logit = torch.max(other_logits)
+            
+            if targeted:
+                # For targeted attack, encourage target_logit to exceed others.
+                f_val = torch.clamp(max_other_logit - target_logit, min=-kappa)
+            else:
+                # For untargeted attack, encourage target_logit to be lower than the maximum other logit.
+                f_val = torch.clamp(target_logit - max_other_logit, min=-kappa)
+            
+            # The overall loss combines the ℓ₂ norm of the perturbation and the attack objective.
+            loss = torch.norm(delta)**2 + c * f_val
+            
+            loss.backward()
+            optimizer.step()
+            
+            # Optionally, early stop if the attack objective is met.
+            with torch.no_grad():
+                adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
+                logits = self.model(adv_audio)
+                if logits.dim() > 1:
+                    logits = logits.squeeze(0)
+                _, predicted = torch.max(logits, 0)
+                if early_stop:
+                    if targeted and predicted.item() == target_label:
+                        print(f"Early stop at iteration {i}")
+                        break
+                    elif not targeted and predicted.item() != target_label:
+                        print(f"Early stop at iteration {i}")
+                        break
+
+        # Return the final adversarial audio, ensuring it is on the CPU.
+        adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
+        return adv_audio.cpu()
+
+
     def INFER(self, audio):
         """
         Infer the transcription from the audio.
@@ -120,7 +205,7 @@ def convert_to_log_mel(audio, sample_rate=16000):
     
     return log_mel
 
-def evaluate(input_audio, target, dent_on=False, num_iter=500):
+def evaluate(input_audio, target, attack_type, dent_on=False, num_iter=500):
     """
     Évalue la défense TENT sur un fichier audio
     Args:
@@ -207,17 +292,23 @@ def evaluate(input_audio, target, dent_on=False, num_iter=500):
 
     try:
         # Effectuer l'attaque
-        logger.info("Début de l'attaque BIM...")
+        logger.info(f"Début de l'attaque {attack_type}...")
         logger.info(f"Paramètres de l'attaque : epsilon=0.0015, alpha=0.00009, num_iter={num_iter}")
-        res = attack.BIM_ATTACK(audio, [target], epsilon=0.0015, alpha=0.00009, 
-                              num_iter=num_iter, targeted=True, early_stop=True)
-        logger.info("Attaque BIM terminée")
+        if attack_type == "BIM":
+            res = attack.BIM_ATTACK(audio, [target], epsilon=0.0015, alpha=0.00009, 
+                                num_iter=num_iter, targeted=True, early_stop=True)
+        elif attack_type == "CW":
+            res = attack.CW_ATTACK(audio, [target])
+        else:
+            res = None
+
+        logger.info(f"Attaque {attack_type} terminée")
 
         if res is None:
             raise ValueError("L'attaque n'a pas réussi à générer un résultat")
 
         # Sauvegarder le résultat
-        output_filename = f"./output/audio_files/result_tent_{'on' if dent_on else 'off'}.wav"
+        output_filename = f"outputs/checkpoints/audio_files/result_tent_{'on' if dent_on else 'off'}.wav"
         if torch.is_tensor(res):
             res = res.detach().cpu()
         
@@ -251,16 +342,17 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     
     # Exemple d'utilisation
-    test_file = "down.wav"
+    test_file = "Data/test_audio/down.wav"
     target_transcription = "up"
+    attack_type = "CW"
     
     print("Test sans DENT...")
-    res1, trans1 = evaluate(test_file, target_transcription, dent_on=False)
+    res1, trans1 = evaluate(test_file, target_transcription, attack_type=attack_type, dent_on=False)
     if res1 is not None:
         print(f"Transcription sans DENT : {trans1}")
     
     print("\nTest avec DENT...")
-    res2, trans2 = evaluate(test_file, target_transcription, dent_on=True)
+    res2, trans2 = evaluate(test_file, target_transcription, attack_type=attack_type, dent_on=True)
     if res2 is not None:
         print(f"Transcription avec DENT : {trans2}")
     
