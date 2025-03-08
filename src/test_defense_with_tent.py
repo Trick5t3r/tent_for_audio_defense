@@ -367,6 +367,8 @@ def evaluate(input_audio, target, attack_type, dent_on=False, num_iter=500):
                                 num_iter=num_iter, targeted=True, early_stop=True)
         elif attack_type == "CW":
             res = attack.CW_ATTACK(audio, [target])
+        elif attack_type == "MIM":
+            res = attack.MIM_ATTACK(audio, [target])
         else:
             res = None
 
@@ -412,7 +414,7 @@ if __name__ == "__main__":
     # Exemple d'utilisation
     test_file = "Data/test_audio/down.wav"
     target_transcription = "up"
-    attack_type = "CW"
+    attack_type = "MIM"
     
     print("Test sans DENT...")
     res1, trans1 = evaluate(test_file, target_transcription, attack_type=attack_type, dent_on=False)

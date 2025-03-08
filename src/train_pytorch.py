@@ -310,6 +310,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                         # Transformer en "up" (index 1)
                         # inputs[i] = attack.BIM_ATTACK(inputs[i].unsqueeze(0), 1, epsilon=epsilon, alpha=alpha, num_iter=num_iter)
                         inputs[i] = attack.CW_ATTACK(inputs[i].unsqueeze(0), 1)
+                        # inputs[i] = attack.MIM_ATTACK(inputs[i].unsqueeze(0), 1)
                 logger.info(f"Labels after adversarial transformation: {labels}")
 
 
