@@ -151,7 +151,75 @@ class ASRAttacks:
         # Return the final adversarial audio, ensuring it is on the CPU.
         adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
         return adv_audio.cpu()
+    
+    def MIM_ATTACK(self, audio, target, epsilon=0.0015, alpha=0.00009, num_iter=500, targeted=True, early_stop=True, mu=1.0):
+        """
+        Perform the Momentum Iterative Method (MIM) attack.
 
+        Args:
+            audio (torch.Tensor): Input audio tensor.
+            target (list): Target transcription.
+            epsilon (float): Maximum allowed perturbation.
+            alpha (float): Step size for each iteration.
+            num_iter (int): Number of iterations.
+            targeted (bool): Whether the attack is targeted.
+            early_stop (bool): Whether to stop early if the attack succeeds.
+            mu (float): Momentum factor.
+
+        Returns:
+            torch.Tensor: Adversarial audio tensor.
+        """
+        # Move audio to device and clone original input.
+        audio = audio.to(self.device)
+        original_audio = audio.clone()
+        target_tensor = torch.tensor([self.labels.index(t) for t in target], device=self.device)
+
+        # Random initialization: start with a random perturbation within the allowed epsilon ball.
+        perturbation = torch.empty_like(audio).uniform_(-epsilon, epsilon)
+        audio_adv = torch.clamp(original_audio + perturbation, min=-1, max=1)
+
+        # Initialize the momentum term.
+        grad_momentum = torch.zeros_like(audio)
+
+        for i in range(num_iter):
+            audio_adv.requires_grad = True
+            outputs = self.model(audio_adv)
+            loss = F.cross_entropy(outputs, target_tensor)
+
+            self.model.zero_grad()
+            loss.backward()
+            grad = audio_adv.grad.data
+
+            # Normalize the gradient using the L1 norm.
+            grad_norm = grad / torch.norm(grad, p=1)
+
+            # Update the momentum term.
+            grad_momentum = mu * grad_momentum + grad_norm
+
+            # For a targeted attack, move in the negative direction of the momentum;
+            # for an untargeted attack, move in the positive direction.
+            if targeted:
+                audio_adv = audio_adv - alpha * grad_momentum.sign()
+            else:
+                audio_adv = audio_adv + alpha * grad_momentum.sign()
+
+            # Project the perturbation back onto the epsilon ball and ensure valid audio bounds.
+            perturbation = torch.clamp(audio_adv - original_audio, min=-epsilon, max=epsilon)
+            audio_adv = torch.clamp(original_audio + perturbation, min=-1, max=1).detach_()
+
+            # Optional early stopping if the attack objective is achieved.
+            if early_stop:
+                with torch.no_grad():
+                    outputs = self.model(audio_adv)
+                    _, predicted = torch.max(outputs, 1)
+                    if targeted and predicted.item() == target_tensor.item():
+                        print(f"Early stop at iteration {i}")
+                        break
+                    elif not targeted and predicted.item() != target_tensor.item():
+                        print(f"Early stop at iteration {i}")
+                        break
+
+        return audio_adv.cpu()
 
     def INFER(self, audio):
         """

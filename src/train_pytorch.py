@@ -64,88 +64,147 @@ class ASRAttacks:
 
         return audio.cpu()
     
-    def CW_ATTACK(self, audio, target, c=1.0, kappa=0, num_iter=500, learning_rate=0.001, targeted=True, early_stop=True):
+    def CW_ATTACK(self, audio, target, c=0.1, num_iter=500, lr=0.01, targeted=True, early_stop=True, kappa=0):
         """
         Perform the Carlini-Wagner (CW) attack.
 
         Args:
             audio (torch.Tensor): Input audio tensor.
-            target (list): Target transcription.
-            c (float): Trade-off constant between perturbation norm and attack objective.
-            kappa (float): Confidence parameter. Higher values enforce stronger misclassification.
-            num_iter (int): Number of optimization iterations.
-            learning_rate (float): Learning rate for gradient descent.
+            target (int): Target class index.
+            c (float): Trade-off constant for the CW loss.
+            num_iter (int): Number of iterations.
+            lr (float): Learning rate for the optimizer.
             targeted (bool): Whether the attack is targeted.
             early_stop (bool): Whether to stop early if the attack succeeds.
+            kappa (float): Confidence margin. A higher value forces a larger gap between logits (default: 0).
 
         Returns:
             torch.Tensor: Adversarial audio tensor.
         """
-        # Move audio to device and clone original input.
+        # Move audio to the device and keep a copy of the original
         audio = audio.to(self.device)
         original_audio = audio.clone()
-        
-        # Convert target transcription to a label index.
-        target_tensor = torch.tensor([self.labels.index(t) for t in target], device=self.device)
-        target_label = target_tensor.item()  # Assume single target for now.
+        target_tensor = torch.tensor([target], device=self.device)
 
-        # Initialize the perturbation delta (starting at zero).
+        # Initialize the perturbation delta as a trainable parameter
         delta = torch.zeros_like(audio, requires_grad=True)
-        
-        # Use an optimizer to update delta.
-        optimizer = torch.optim.Adam([delta], lr=learning_rate)
-        
+        optimizer = torch.optim.Adam([delta], lr=lr)
+
         for i in range(num_iter):
-            optimizer.zero_grad()
-            
-            # Create the adversarial example and ensure it stays within valid bounds.
-            adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
-            
-            # Obtain the logits from the model.
-            logits = self.model(adv_audio)
-            # Squeeze extra dimensions if needed (assume single sample).
-            if logits.dim() > 1:
-                logits = logits.squeeze(0)
-            
-            # For CW, define the attack loss term f. For a targeted attack, we want the target logit 
-            # to be higher than all others by a margin. For an untargeted attack, we want the target logit 
-            # to fall behind the highest non-target logit.
-            target_logit = logits[target_label]
-            # Exclude the target class from the others.
-            other_logits = torch.cat([logits[:target_label], logits[target_label+1:]])
-            max_other_logit = torch.max(other_logits)
-            
+            # Compute the adversarial example and enforce valid audio range
+            adv_audio = torch.clamp(audio + delta, min=-1, max=1)
+            outputs = self.model(adv_audio)
+
+            # Compute the CW loss f(x+delta)
             if targeted:
-                # For targeted attack, encourage target_logit to exceed others.
-                f_val = torch.clamp(max_other_logit - target_logit, min=-kappa)
+                # For a targeted attack, we want the target logit to be higher than all others.
+                target_logit = outputs[0, target]
+                # Exclude the target class to get the maximum logit among the rest
+                mask = torch.ones(outputs.size(), dtype=torch.bool, device=self.device)
+                mask[0, target] = False
+                other_logits = outputs[mask].view(1, -1)
+                max_other_logit, _ = torch.max(other_logits, dim=1)
+                # f should be <= 0 when target_logit is larger than every other logit by at least kappa.
+                f = torch.clamp(max_other_logit - target_logit, min=-kappa)
             else:
-                # For untargeted attack, encourage target_logit to be lower than the maximum other logit.
-                f_val = torch.clamp(target_logit - max_other_logit, min=-kappa)
-            
-            # The overall loss combines the ℓ₂ norm of the perturbation and the attack objective.
-            loss = torch.norm(delta)**2 + c * f_val
-            
-            loss.backward()
+                # For an untargeted attack, we want the true class logit to fall below some other logit.
+                target_logit = outputs[0, target]
+                mask = torch.ones(outputs.size(), dtype=torch.bool, device=self.device)
+                mask[0, target] = False
+                other_logits = outputs[mask].view(1, -1)
+                max_other_logit, _ = torch.max(other_logits, dim=1)
+                f = torch.clamp(target_logit - max_other_logit, min=-kappa)
+
+            # The loss is the L2 norm squared of the perturbation plus c times the CW loss term.
+            loss = torch.norm(delta, p=2)**2 + c * f
+
+            optimizer.zero_grad()
+            loss.backward(retain_graph=True)
             optimizer.step()
-            
-            # Optionally, early stop if the attack objective is met.
-            with torch.no_grad():
-                adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
-                logits = self.model(adv_audio)
-                if logits.dim() > 1:
-                    logits = logits.squeeze(0)
-                _, predicted = torch.max(logits, 0)
-                if early_stop:
-                    if targeted and predicted.item() == target_label:
-                        print(f"Early stop at iteration {i}")
-                        break
-                    elif not targeted and predicted.item() != target_label:
+
+            # Ensure that the perturbation keeps the adversarial example within valid bounds
+            delta.data = torch.clamp(delta.data, -1 - audio, 1 - audio)
+
+            # Early stopping if the attack succeeds
+            if early_stop:
+                with torch.no_grad():
+                    adv_audio = torch.clamp(audio + delta, min=-1, max=1)
+                    outputs = self.model(adv_audio)
+                    _, predicted = torch.max(outputs, 1)
+                    if targeted:
+                        if predicted.item() == target_tensor.item():
+                            print(f"Early stop at iteration {i}")
+                            break
+                    else:
+                        if predicted.item() != target_tensor.item():
+                            print(f"Early stop at iteration {i}")
+                            break
+
+        adv_audio = torch.clamp(audio + delta, min=-1, max=1)
+        return adv_audio.cpu()
+    
+    def MIM_ATTACK(self, audio, target, epsilon=0.0015, alpha=0.00009, num_iter=500, targeted=True, early_stop=True, decay_factor=1.0):
+        """
+        Perform the Momentum Iterative Method (MIM) attack.
+
+        Args:
+            audio (torch.Tensor): Input audio tensor.
+            target (int): Target class index.
+            epsilon (float): Maximum perturbation.
+            alpha (float): Step size for each iteration.
+            num_iter (int): Number of iterations.
+            targeted (bool): Whether the attack is targeted.
+            early_stop (bool): Whether to stop early if the attack succeeds.
+            decay_factor (float): Momentum decay factor (commonly denoted as μ).
+
+        Returns:
+            torch.Tensor: Adversarial audio tensor.
+        """
+        audio = audio.to(self.device)
+        original_audio = audio.clone()
+        target_tensor = torch.tensor([target], device=self.device)
+        # Initialize the momentum term with zeros (same shape as the audio)
+        momentum = torch.zeros_like(audio)
+
+        for i in range(num_iter):
+            audio.requires_grad = True
+            outputs = self.model(audio)
+            loss = F.cross_entropy(outputs, target_tensor)
+
+            self.model.zero_grad()
+            loss.backward(retain_graph=True)
+            audio_grad = audio.grad.data
+
+            # Normalize the gradient by its L1 norm to stabilize updates
+            grad_norm = torch.norm(audio_grad.view(audio_grad.shape[0], -1), p=1, dim=1)
+            # Reshape for broadcasting and add a small constant to avoid division by zero
+            grad_norm = grad_norm.view(-1, *([1] * (len(audio_grad.shape) - 1))) + 1e-8
+            normalized_grad = audio_grad / grad_norm
+
+            # Update the momentum: accumulate a fraction of the previous momentum and the current normalized gradient
+            momentum = decay_factor * momentum + normalized_grad
+
+            # Use the sign of the momentum for the update step (flip sign based on targeted or untargeted attack)
+            if targeted:
+                perturbed_audio = audio - alpha * momentum.sign()
+            else:
+                perturbed_audio = audio + alpha * momentum.sign()
+
+            # Ensure the perturbation remains within the epsilon-ball and the audio stays within valid bounds
+            perturbation = torch.clamp(perturbed_audio - original_audio, min=-epsilon, max=epsilon)
+            audio = torch.clamp(original_audio + perturbation, min=-1, max=1).detach_()
+
+            if early_stop:
+                with torch.no_grad():
+                    outputs = self.model(audio)
+                    _, predicted = torch.max(outputs, 1)
+                    if predicted.item() == target_tensor.item():
                         print(f"Early stop at iteration {i}")
                         break
 
-        # Return the final adversarial audio, ensuring it is on the CPU.
-        adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
-        return adv_audio.cpu()
+        return audio.cpu()
+
+
 
     def INFER(self, audio):
         """
