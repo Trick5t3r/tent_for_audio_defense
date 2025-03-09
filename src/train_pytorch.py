@@ -233,12 +233,12 @@ def main():
 
     # Paramètres
     batch_size = 32
-    num_epochs = 6
+    num_epochs = 15
     learning_rate = 0.001
     epsilon = 0.0015  # Taille maximale de la perturbation
     alpha = 0.00009   # Taille du pas pour chaque itération
     num_iter = 15   # Nombre d'itérations
-    adversarial_frequency = 3  # Fréquence de l'entraînement adversarial (toutes les X époques)
+    adversarial_frequency = 5  # Fréquence de l'entraînement adversarial (toutes les X époques)
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

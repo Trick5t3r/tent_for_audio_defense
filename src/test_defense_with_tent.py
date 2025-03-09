@@ -69,13 +69,14 @@ class ASRAttacks:
         return audio.cpu()
 
     
-    def CW_ATTACK(self, audio, target, c=1.0, kappa=0, num_iter=500, learning_rate=0.001, targeted=True, early_stop=True):
+    def CW_ATTACK(self, audio, target, epsilon=0.0015, c=1.0, kappa=0, num_iter=500, learning_rate=0.001, targeted=True, early_stop=True):
         """
         Perform the Carlini-Wagner (CW) attack.
 
         Args:
             audio (torch.Tensor): Input audio tensor.
             target (list): Target transcription.
+            epsilon (float): Maximum perturbation per element.
             c (float): Trade-off constant between perturbation norm and attack objective.
             kappa (float): Confidence parameter. Higher values enforce stronger misclassification.
             num_iter (int): Number of optimization iterations.
@@ -130,8 +131,11 @@ class ASRAttacks:
             # The overall loss combines the ℓ₂ norm of the perturbation and the attack objective.
             loss = torch.norm(delta)**2 + c * f_val
             
-            loss.backward()
+            loss.backward(retain_graph=True)
             optimizer.step()
+
+            # Ensure the perturbation does not exceed epsilon element-wise.
+            delta.data = torch.clamp(delta.data, -epsilon, epsilon)
             
             # Optionally, early stop if the attack objective is met.
             with torch.no_grad():
@@ -151,6 +155,7 @@ class ASRAttacks:
         # Return the final adversarial audio, ensuring it is on the CPU.
         adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
         return adv_audio.cpu()
+
     
     def MIM_ATTACK(self, audio, target, epsilon=0.0015, alpha=0.00009, num_iter=500, targeted=True, early_stop=True, mu=1.0):
         """
@@ -303,7 +308,7 @@ def evaluate(input_audio, target, attack_type, dent_on=False, num_iter=500):
     # Load the model
     logger.info("Chargement du modèle...")
     model = CNN(batch_norm=True, num_classes=3)
-    chemin_du_modele = 'outputs/checkpoints/model_epoch_6.pth'
+    chemin_du_modele = 'outputs/checkpoints/model_epoch_15.pth'
     model.load_state_dict(torch.load(chemin_du_modele))
     logger.info("Modèle chargé avec succès")
     
@@ -414,7 +419,7 @@ if __name__ == "__main__":
     # Exemple d'utilisation
     test_file = "Data/test_audio/down.wav"
     target_transcription = "up"
-    attack_type = "MIM"
+    attack_type = "CW"
     
     print("Test sans DENT...")
     res1, trans1 = evaluate(test_file, target_transcription, attack_type=attack_type, dent_on=False)
