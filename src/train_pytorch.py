@@ -10,6 +10,7 @@ import numpy as np
 from model_pytorch import CNN
 from pathlib import Path
 import torch.nn.functional as F
+import random
 
 class ASRAttacks:
     def __init__(self, model, device, labels):
@@ -239,6 +240,7 @@ def main():
     alpha = 0.00009   # Taille du pas pour chaque itération
     num_iter = 15   # Nombre d'itérations
     adversarial_frequency = 3  # Fréquence de l'entraînement adversarial (toutes les X époques)
+    num_classes = 3
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -269,7 +271,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     # Créer le modèle
-    model = CNN(batch_norm=True, num_classes=3)  # 12 classes pour les commandes vocales
+    model = CNN(batch_norm=True, num_classes=num_classes)  # 12 classes pour les commandes vocales
     model = model.to(device)
 
     # Définir la fonction de perte et l'optimiseur
@@ -284,15 +286,38 @@ def main():
 
     # Entraîner le modèle
     logger.info("Début de l'entraînement...")
-    train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, adversarial_frequency, attack)
+    train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.2)
     logger.info("Entraînement terminé!")
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, adversarial_frequency, attack):
-    """Fonction d'entraînement du modèle avec phases normales et adversariales."""
+def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, 
+                epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.5, lambda_consistency=0.1):
+    """
+    Train the model using both clean and adversarial examples at every epoch,
+    but only generating adversarial attacks for a fraction of samples per batch.
+    
+    For multi-class classification, for each attacked sample a target is chosen 
+    at random from all classes except the true label.
+    
+    Additionally, a consistency regularisation term (via KL divergence) is applied
+    to the attacked samples to encourage similar predictions between clean and adversarial inputs.
+    
+    Parameters:
+    - model: the neural network to be trained.
+    - train_loader: DataLoader for training data.
+    - val_loader: DataLoader for validation data.
+    - criterion: loss function (e.g., nn.CrossEntropyLoss() or with label smoothing).
+    - optimizer: optimizer for updating model parameters.
+    - num_epochs: number of training epochs.
+    - device: device to run training on (e.g., 'cuda' or 'cpu').
+    - epsilon, alpha, num_iter: parameters for the adversarial attack.
+    - attack: adversarial attack module (with methods such as CW_ATTACK).
+    - num_classes: total number of classes in the dataset.
+    - attack_fraction: fraction of samples in each batch to be attacked (0 <= attack_fraction <= 1).
+    - lambda_consistency: weight for the consistency (smoothing) loss.
+    """
     best_val_acc = 0.0
 
     for epoch in range(num_epochs):
-        # Phase d'entraînement
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -300,34 +325,56 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
         for inputs, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}'):
             inputs, labels = inputs.to(device), labels.to(device)
-
-            # Alterner entre entraînement normal et adversarial
-            if (epoch + 1) % adversarial_frequency == 0:
-                # Générer des exemples adversariaux avec BIM uniquement pour les échantillons "down"
-                target_labels = []
-                for i, label in enumerate(labels):
-                    if label.item() == 0:  # Si c'est un "down"
-                        # Transformer en "up" (index 1)
-                        # inputs[i] = attack.BIM_ATTACK(inputs[i].unsqueeze(0), 1, epsilon=epsilon, alpha=alpha, num_iter=num_iter)
-                        inputs[i] = attack.CW_ATTACK(inputs[i].unsqueeze(0), 1)
-                        # inputs[i] = attack.MIM_ATTACK(inputs[i].unsqueeze(0), 1)
-                logger.info(f"Labels after adversarial transformation: {labels}")
-
+            adv_inputs = inputs.clone()
+            
+            # Keep track of indices for which an attack was applied.
+            attacked_indices = []
+            
+            # For each sample in the batch, decide whether to apply an adversarial attack.
+            for i, label in enumerate(labels):
+                if random.random() < attack_fraction:
+                    # For multi-class classification: choose a random target that's not the true label.
+                    possible_targets = [c for c in range(num_classes) if c != label.item()]
+                    target = random.choice(possible_targets)
+                    adv_example = attack.CW_ATTACK(adv_inputs[i].unsqueeze(0), target)
+                    # Assuming the attack returns a tensor of shape [1, ...], we squeeze it back.
+                    adv_inputs[i] = adv_example.squeeze(0)
+                    attacked_indices.append(i)
+            
+            logger.info(f"Batch labels: {labels}. Number of attacked samples: {len(attacked_indices)}")
 
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
+
+            # Forward pass on clean inputs.
+            outputs_clean = model(inputs)
+            loss_clean = criterion(outputs_clean, labels)
+
+            # Forward pass on adversarial inputs.
+            outputs_adv = model(adv_inputs)
+            loss_adv = criterion(outputs_adv, labels)
+
+            # Consistency regularisation is computed only for the attacked samples.
+            if attacked_indices:
+                # Create tensor of attacked indices.
+                attacked_indices_tensor = torch.tensor(attacked_indices, device=device)
+                consistency_loss = F.kl_div(F.log_softmax(outputs_adv[attacked_indices_tensor], dim=1), 
+                                            F.softmax(outputs_clean[attacked_indices_tensor], dim=1), 
+                                            reduction='batchmean')
+            else:
+                consistency_loss = 0.0
+
+            total_loss = loss_clean + loss_adv + lambda_consistency * consistency_loss
+            total_loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
+            train_loss += total_loss.item()
+            _, predicted = outputs_clean.max(1)
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
 
         train_acc = 100. * train_correct / train_total
 
-        # Phase de validation
+        # Validation phase (using clean inputs).
         model.eval()
         val_loss = 0.0
         val_correct = 0
@@ -338,7 +385,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
-
                 val_loss += loss.item()
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
@@ -350,13 +396,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         logger.info(f'Train Loss: {train_loss/len(train_loader):.4f}, Train Acc: {train_acc:.2f}%')
         logger.info(f'Val Loss: {val_loss/len(val_loader):.4f}, Val Acc: {val_acc:.2f}%')
 
-        # Sauvegarder le meilleur modèle
+        # Save the best model based on validation accuracy.
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), 'outputs/checkpoints/best_model.pth')
-            logger.info(f'Nouveau meilleur modèle sauvegardé avec une précision de {val_acc:.2f}%')
+            logger.info(f'New best model saved with accuracy {val_acc:.2f}%')
 
-        # Sauvegarder le modèle à chaque époque
+        # Save model at every epoch.
         torch.save(model.state_dict(), f'outputs/checkpoints/model_epoch_{epoch+1}.pth')
 
 class SpeechCommandsDataset(Dataset):
