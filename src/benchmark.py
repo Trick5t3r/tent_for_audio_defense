@@ -287,7 +287,7 @@ def main():
     results = compare_models(model_paths, test_dataset, device)
     
     # Sauvegarder les résultats dans un fichier
-    print("Terliné")
+    print("Terminé")
     with open('outputs/benchmark_results.txt', 'w', encoding='utf-8') as f:
         f.write("Résultats des benchmarks :\n\n")
         for model_path, metrics in results.items():
