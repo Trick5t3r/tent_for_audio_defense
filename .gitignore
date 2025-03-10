@@ -10,3 +10,4 @@ Data/speech_commands_v0.01.tar.gz
 Data/speech_commands_v0.01/
 .venv/
 .vscode/
+outputs/checkpoints/trained_model
