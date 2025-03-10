@@ -280,7 +280,7 @@ def main():
     # Chemins des modèles à comparer
     model_paths = [
         # 'outputs/checkpoints/trained_model/BIM_trained_model/model_epoch_15.pth',  # Modèle avec adversarial training
-        'outputs/checkpoints/checkpoint-epoch3.pt',  # Modèle standard
+        'outputs/checkpoints/checkpoint-epoch27.pt',  # Modèle standard
     ]
     
     # Effectuer la comparaison
