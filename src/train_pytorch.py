@@ -65,9 +65,9 @@ class ASRAttacks:
 
         return audio.cpu()
     
-    def CW_ATTACK(self, audio, target, c=0.1, num_iter=500, lr=0.01, targeted=True, early_stop=True, kappa=0):
+    def CW_ATTACK(self, audio, target, c=0.1, num_iter=500, lr=0.01, targeted=True, early_stop=True, kappa=0, epsilon=0.0015, verbose=False):
         """
-        Perform the Carlini-Wagner (CW) attack.
+        Perform the Carlini-Wagner (CW) attack with an additional perturbation bound.
 
         Args:
             audio (torch.Tensor): Input audio tensor.
@@ -77,8 +77,9 @@ class ASRAttacks:
             lr (float): Learning rate for the optimizer.
             targeted (bool): Whether the attack is targeted.
             early_stop (bool): Whether to stop early if the attack succeeds.
-            kappa (float): Confidence margin. A higher value forces a larger gap between logits (default: 0).
-
+            kappa (float): Confidence margin.
+            epsilon (float): Maximum allowed perturbation (L∞ bound).
+            
         Returns:
             torch.Tensor: Adversarial audio tensor.
         """
@@ -98,7 +99,6 @@ class ASRAttacks:
 
             # Compute the CW loss f(x+delta)
             if targeted:
-                # For a targeted attack, we want the target logit to be higher than all others.
                 target_logit = outputs[0, target]
                 # Exclude the target class to get the maximum logit among the rest
                 mask = torch.ones(outputs.size(), dtype=torch.bool, device=self.device)
@@ -108,7 +108,6 @@ class ASRAttacks:
                 # f should be <= 0 when target_logit is larger than every other logit by at least kappa.
                 f = torch.clamp(max_other_logit - target_logit, min=-kappa)
             else:
-                # For an untargeted attack, we want the true class logit to fall below some other logit.
                 target_logit = outputs[0, target]
                 mask = torch.ones(outputs.size(), dtype=torch.bool, device=self.device)
                 mask[0, target] = False
@@ -116,14 +115,16 @@ class ASRAttacks:
                 max_other_logit, _ = torch.max(other_logits, dim=1)
                 f = torch.clamp(target_logit - max_other_logit, min=-kappa)
 
-            # The loss is the L2 norm squared of the perturbation plus c times the CW loss term.
+            # Loss: L2 norm squared of perturbation plus c times the CW loss term.
             loss = torch.norm(delta, p=2)**2 + c * f
 
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
             optimizer.step()
 
-            # Ensure that the perturbation keeps the adversarial example within valid bounds
+            # Project delta onto the epsilon ball (L∞ bound)
+            delta.data = torch.clamp(delta.data, -epsilon, epsilon)
+            # Additionally, ensure that audio + delta stays within [-1, 1]
             delta.data = torch.clamp(delta.data, -1 - audio, 1 - audio)
 
             # Early stopping if the attack succeeds
@@ -134,15 +135,18 @@ class ASRAttacks:
                     _, predicted = torch.max(outputs, 1)
                     if targeted:
                         if predicted.item() == target_tensor.item():
-                            print(f"Early stop at iteration {i}")
+                            if verbose:
+                                print(f"Early stop at iteration {i}")
                             break
                     else:
                         if predicted.item() != target_tensor.item():
-                            print(f"Early stop at iteration {i}")
+                            if verbose:
+                                print(f"Early stop at iteration {i}")
                             break
 
         adv_audio = torch.clamp(audio + delta, min=-1, max=1)
         return adv_audio.cpu()
+
     
     def MIM_ATTACK(self, audio, target, epsilon=0.0015, alpha=0.00009, num_iter=500, targeted=True, early_stop=True, decay_factor=1.0):
         """
@@ -235,9 +239,9 @@ def main():
     # Paramètres
     batch_size = 32
     num_epochs = 6
-    learning_rate = 0.001
+    learning_rate = 0.01
     epsilon = 0.0015  # Taille maximale de la perturbation
-    alpha = 0.00009   # Taille du pas pour chaque itération
+    alpha = 0.003   # Taille du pas pour chaque itération
     num_iter = 15   # Nombre d'itérations
     adversarial_frequency = 3  # Fréquence de l'entraînement adversarial (toutes les X époques)
     num_classes = 3
@@ -286,11 +290,11 @@ def main():
 
     # Entraîner le modèle
     logger.info("Début de l'entraînement...")
-    train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.2)
+    train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, attack, num_classes)
     logger.info("Entraînement terminé!")
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, 
-                epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.5, lambda_consistency=0.1):
+                epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.1, beta=0.3):
     """
     Train the model using both clean and adversarial examples at every epoch,
     but only generating adversarial attacks for a fraction of samples per batch.
@@ -351,19 +355,15 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
             # Forward pass on adversarial inputs.
             outputs_adv = model(adv_inputs)
-            loss_adv = criterion(outputs_adv, labels)
+            loss_adv = 0
 
             # Consistency regularisation is computed only for the attacked samples.
             if attacked_indices:
                 # Create tensor of attacked indices.
                 attacked_indices_tensor = torch.tensor(attacked_indices, device=device)
-                consistency_loss = F.kl_div(F.log_softmax(outputs_adv[attacked_indices_tensor], dim=1), 
-                                            F.softmax(outputs_clean[attacked_indices_tensor], dim=1), 
-                                            reduction='batchmean')
-            else:
-                consistency_loss = 0.0
+                loss_adv = criterion(outputs_adv[attacked_indices_tensor], labels[attacked_indices_tensor])
 
-            total_loss = loss_clean + loss_adv + lambda_consistency * consistency_loss
+            total_loss = loss_clean + beta*loss_adv
             total_loss.backward()
             optimizer.step()
 
