@@ -6,13 +6,13 @@ import numpy as np
 from pathlib import Path
 import logging
 from tqdm import tqdm
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from train_pytorch import SpeechCommandsDataset, CNN, ASRAttacks
 from test_defense_with_tent import evaluate
 from dent.dent import Dent
 from dent.conf import cfg
-import os
-import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configuration du logging
@@ -168,13 +168,13 @@ def compare_models(model_paths, test_dataset, device):
             logger.info(f"Perturbation moyenne : {results[key]['avg_perturbation']:.6f}")
             logger.info(f"Temps moyen d'attaque : {results[key]['avg_attack_time']:.2f} ms")
     
-    # Plot des résultats
+    # Plot des résultats avec Plotly
     plot_benchmark_results(results)
     
     return results
 
 def plot_benchmark_results(results):
-    """Plot les résultats des benchmarks."""
+    """Plot les résultats des benchmarks avec Plotly."""
     # Organiser les données par modèle
     model_names = []
     success_rates_no_dent = []
@@ -208,44 +208,65 @@ def plot_benchmark_results(results):
         perturbations_with_dent.append(results[with_dent_key]['avg_perturbation'])
         attack_times_with_dent.append(results[with_dent_key]['avg_attack_time'])
     
-    # Créer une figure avec 3 sous-graphiques
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+    # Création des sous-graphes avec Plotly
+    fig = make_subplots(rows=1, cols=3, subplot_titles=(
+        "Taux de réussite des attaques", "Perturbation moyenne", "Temps moyen d'attaque"
+    ))
     
-    # Paramètres pour les barres groupées
-    x = np.arange(len(model_names))
-    width = 0.35
+    x = model_names
+    # Graphique du taux de réussite
+    fig.add_trace(
+        go.Bar(name="Sans DENT", x=x, y=success_rates_no_dent),
+        row=1, col=1
+    )
+    fig.add_trace(
+        go.Bar(name="Avec DENT", x=x, y=success_rates_with_dent),
+        row=1, col=1
+    )
     
-    # Plot du taux de réussite
-    ax1.bar(x - width/2, success_rates_no_dent, width, label='Sans DENT')
-    ax1.bar(x + width/2, success_rates_with_dent, width, label='Avec DENT')
-    ax1.set_title('Taux de réussite des attaques')
-    ax1.set_ylabel('Taux de réussite (%)')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(model_names, rotation=45)
-    ax1.legend()
+    # Graphique de la perturbation moyenne
+    fig.add_trace(
+        go.Bar(name="Sans DENT", x=x, y=perturbations_no_dent),
+        row=1, col=2
+    )
+    fig.add_trace(
+        go.Bar(name="Avec DENT", x=x, y=perturbations_with_dent),
+        row=1, col=2
+    )
     
-    # Plot de la perturbation moyenne
-    ax2.bar(x - width/2, perturbations_no_dent, width, label='Sans DENT')
-    ax2.bar(x + width/2, perturbations_with_dent, width, label='Avec DENT')
-    ax2.set_title('Perturbation moyenne')
-    ax2.set_ylabel('Perturbation')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(model_names, rotation=45)
-    ax2.legend()
+    # Graphique du temps moyen d'attaque
+    fig.add_trace(
+        go.Bar(name="Sans DENT", x=x, y=attack_times_no_dent),
+        row=1, col=3
+    )
+    fig.add_trace(
+        go.Bar(name="Avec DENT", x=x, y=attack_times_with_dent),
+        row=1, col=3
+    )
     
-    # Plot du temps moyen d'attaque
-    ax3.bar(x - width/2, attack_times_no_dent, width, label='Sans DENT')
-    ax3.bar(x + width/2, attack_times_with_dent, width, label='Avec DENT')
-    ax3.set_title("Temps moyen d'attaque")
-    ax3.set_ylabel('Temps (ms)')
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(model_names, rotation=45)
-    ax3.legend()
+    # Mise à jour de la mise en page
+    fig.update_layout(
+        barmode='group',
+        title_text="Résultats des benchmarks",
+        template="plotly_white",
+        width=1200,
+        height=500
+    )
     
-    plt.tight_layout()
-    plt.savefig('outputs/benchmark_results.png')
-    plt.close()
-
+    # Mise à jour des axes pour chaque sous-graphe
+    fig.update_xaxes(title_text="Modèles", row=1, col=1)
+    fig.update_xaxes(title_text="Modèles", row=1, col=2)
+    fig.update_xaxes(title_text="Modèles", row=1, col=3)
+    
+    fig.update_yaxes(title_text="Taux de réussite (%)", row=1, col=1)
+    fig.update_yaxes(title_text="Perturbation", row=1, col=2)
+    fig.update_yaxes(title_text="Temps (ms)", row=1, col=3)
+    
+    # Sauvegarder la figure en tant qu'image PNG (nécessite kaleido)
+    output_path = 'outputs/benchmark_results.png'
+    fig.write_image(output_path)
+    logger.info(f"Graphique sauvegardé sous : {output_path}")
+    
 def main():
     # Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -257,14 +278,15 @@ def main():
     
     # Chemins des modèles à comparer
     model_paths = [
-        'outputs/checkpoints/trained_model/BIM_trained_model/model_epoch_15.pth',  # Modèle avec adversarial training
-        'outputs/checkpoints/checkpoint-epoch20.pt',  # Modèle standard
+        # 'outputs/checkpoints/trained_model/BIM_trained_model/model_epoch_15.pth',  # Modèle avec adversarial training
+        'outputs/checkpoints/checkpoint-epoch30.pt',  # Modèle standard
     ]
     
     # Effectuer la comparaison
     results = compare_models(model_paths, test_dataset, device)
     
     # Sauvegarder les résultats dans un fichier
+    print("Terliné")
     with open('outputs/benchmark_results.txt', 'w', encoding='utf-8') as f:
         f.write("Résultats des benchmarks :\n\n")
         for model_path, metrics in results.items():
