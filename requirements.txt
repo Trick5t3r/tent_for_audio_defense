@@ -31,3 +31,5 @@ tqdm
 typing_extensions
 Werkzeug
 yacs
+pandas
+matplotlib
