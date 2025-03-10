@@ -33,3 +33,5 @@ Werkzeug
 yacs
 pandas
 matplotlib
+plotly
+nbformat
