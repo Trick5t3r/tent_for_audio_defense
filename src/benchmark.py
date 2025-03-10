@@ -214,33 +214,33 @@ def plot_benchmark_results(results):
     ))
     
     x = model_names
-    # Graphique du taux de réussite
+    # Graphique du taux de réussite avec couleurs personnalisées
     fig.add_trace(
-        go.Bar(name="Sans DENT", x=x, y=success_rates_no_dent),
+        go.Bar(name="Sans DENT", x=x, y=success_rates_no_dent, marker=dict(color='red')),
         row=1, col=1
     )
     fig.add_trace(
-        go.Bar(name="Avec DENT", x=x, y=success_rates_with_dent),
+        go.Bar(name="Avec DENT", x=x, y=success_rates_with_dent, marker=dict(color='blue')),
         row=1, col=1
     )
     
-    # Graphique de la perturbation moyenne
+    # Graphique de la perturbation moyenne avec couleurs personnalisées
     fig.add_trace(
-        go.Bar(name="Sans DENT", x=x, y=perturbations_no_dent),
+        go.Bar(name="Sans DENT", x=x, y=perturbations_no_dent, marker=dict(color='red')),
         row=1, col=2
     )
     fig.add_trace(
-        go.Bar(name="Avec DENT", x=x, y=perturbations_with_dent),
+        go.Bar(name="Avec DENT", x=x, y=perturbations_with_dent, marker=dict(color='blue')),
         row=1, col=2
     )
     
-    # Graphique du temps moyen d'attaque
+    # Graphique du temps moyen d'attaque avec couleurs personnalisées
     fig.add_trace(
-        go.Bar(name="Sans DENT", x=x, y=attack_times_no_dent),
+        go.Bar(name="Sans DENT", x=x, y=attack_times_no_dent, marker=dict(color='red')),
         row=1, col=3
     )
     fig.add_trace(
-        go.Bar(name="Avec DENT", x=x, y=attack_times_with_dent),
+        go.Bar(name="Avec DENT", x=x, y=attack_times_with_dent, marker=dict(color='blue')),
         row=1, col=3
     )
     
@@ -266,6 +266,7 @@ def plot_benchmark_results(results):
     output_path = 'outputs/benchmark_results.png'
     fig.write_image(output_path)
     logger.info(f"Graphique sauvegardé sous : {output_path}")
+
     
 def main():
     # Configuration
@@ -279,7 +280,7 @@ def main():
     # Chemins des modèles à comparer
     model_paths = [
         # 'outputs/checkpoints/trained_model/BIM_trained_model/model_epoch_15.pth',  # Modèle avec adversarial training
-        'outputs/checkpoints/checkpoint-epoch30.pt',  # Modèle standard
+        'outputs/checkpoints/checkpoint-epoch3.pt',  # Modèle standard
     ]
     
     # Effectuer la comparaison
