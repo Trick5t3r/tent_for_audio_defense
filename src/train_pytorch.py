@@ -238,7 +238,7 @@ def main():
 
     # Paramètres
     batch_size = 32
-    num_epochs = 6
+    num_epochs = 15
     learning_rate = 0.01
     epsilon = 0.0015  # Taille maximale de la perturbation
     alpha = 0.003   # Taille du pas pour chaque itération
@@ -293,8 +293,40 @@ def main():
     train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, epsilon, alpha, num_iter, attack, num_classes)
     logger.info("Entraînement terminé!")
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, 
-                epsilon, alpha, num_iter, attack, num_classes, attack_fraction=0.1, beta=0.3):
+import torch
+import random
+from tqdm import tqdm
+import logging
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+logger = logging.getLogger(__name__)
+
+import torch
+import random
+from tqdm import tqdm
+import logging
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+logger = logging.getLogger(__name__)
+
+def train_model(
+    model, 
+    train_loader, 
+    val_loader, 
+    criterion, 
+    optimizer, 
+    num_epochs, 
+    device, 
+    epsilon, 
+    alpha, 
+    num_iter, 
+    attack, 
+    num_classes, 
+    attack_fraction=0.1, 
+    beta=0.3
+):
     """
     Train the model using both clean and adversarial examples at every epoch,
     but only generating adversarial attacks for a fraction of samples per batch.
@@ -317,93 +349,241 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     - attack: adversarial attack module (with methods such as CW_ATTACK).
     - num_classes: total number of classes in the dataset.
     - attack_fraction: fraction of samples in each batch to be attacked (0 <= attack_fraction <= 1).
-    - lambda_consistency: weight for the consistency (smoothing) loss.
+    - beta: weight for the adversarial loss term.
     """
+
     best_val_acc = 0.0
+    
+    # Lists to store metrics per epoch
+    train_losses = []
+    val_losses = []
+    train_accuracies = []
+    val_accuracies = []
+    
+    # If you have a separate measure for "Smoothing Clean Accuracy":
+    smoothing_accuracies = []
+    
+    # If you want to track robust accuracy (accuracy on adversarial examples):
+    robust_accuracies = []
 
     for epoch in range(num_epochs):
         model.train()
-        train_loss = 0.0
-        train_correct = 0
-        train_total = 0
+        epoch_train_loss = 0.0
+        epoch_train_correct = 0
+        epoch_train_total = 0
 
+        # ------------------
+        #   TRAINING LOOP
+        # ------------------
         for inputs, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}'):
             inputs, labels = inputs.to(device), labels.to(device)
             adv_inputs = inputs.clone()
             
-            # Keep track of indices for which an attack was applied.
+            # Keep track of indices for which an attack was applied
             attacked_indices = []
             
-            # For each sample in the batch, decide whether to apply an adversarial attack.
+            # Decide which samples to attack
             for i, label in enumerate(labels):
                 if random.random() < attack_fraction:
-                    # For multi-class classification: choose a random target that's not the true label.
+                    # Choose a random target that's not the true label
                     possible_targets = [c for c in range(num_classes) if c != label.item()]
                     target = random.choice(possible_targets)
                     adv_example = attack.CW_ATTACK(adv_inputs[i].unsqueeze(0), target)
-                    # Assuming the attack returns a tensor of shape [1, ...], we squeeze it back.
                     adv_inputs[i] = adv_example.squeeze(0)
                     attacked_indices.append(i)
             
-            logger.info(f"Batch labels: {labels}. Number of attacked samples: {len(attacked_indices)}")
+            """logger.info(
+                f"Batch labels: {labels.cpu().numpy()}. "
+                f"Number of attacked samples: {len(attacked_indices)}"
+            )"""
 
             optimizer.zero_grad()
 
-            # Forward pass on clean inputs.
+            # Forward pass on clean inputs
             outputs_clean = model(inputs)
             loss_clean = criterion(outputs_clean, labels)
 
-            # Forward pass on adversarial inputs.
+            # Forward pass on adversarial inputs (only for attacked samples)
             outputs_adv = model(adv_inputs)
-            loss_adv = 0
-
-            # Consistency regularisation is computed only for the attacked samples.
+            loss_adv = 0.0
             if attacked_indices:
-                # Create tensor of attacked indices.
                 attacked_indices_tensor = torch.tensor(attacked_indices, device=device)
-                loss_adv = criterion(outputs_adv[attacked_indices_tensor], labels[attacked_indices_tensor])
+                loss_adv = criterion(
+                    outputs_adv[attacked_indices_tensor], 
+                    labels[attacked_indices_tensor]
+                )
 
-            total_loss = loss_clean + beta*loss_adv
+            total_loss = loss_clean + beta * loss_adv
             total_loss.backward()
             optimizer.step()
 
-            train_loss += total_loss.item()
+            epoch_train_loss += total_loss.item()
             _, predicted = outputs_clean.max(1)
-            train_total += labels.size(0)
-            train_correct += predicted.eq(labels).sum().item()
+            epoch_train_total += labels.size(0)
+            epoch_train_correct += predicted.eq(labels).sum().item()
 
-        train_acc = 100. * train_correct / train_total
+        # Compute mean training loss and accuracy
+        train_loss_epoch = epoch_train_loss / len(train_loader)
+        train_acc_epoch = 100.0 * epoch_train_correct / epoch_train_total
 
-        # Validation phase (using clean inputs).
+        train_losses.append(train_loss_epoch)
+        train_accuracies.append(train_acc_epoch)
+
+        # ------------------
+        #   VALIDATION LOOP
+        # ------------------
         model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
+        epoch_val_loss = 0.0
+        epoch_val_correct = 0
+        epoch_val_total = 0
 
         with torch.no_grad():
             for inputs, labels in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
-                val_loss += loss.item()
+                epoch_val_loss += loss.item()
                 _, predicted = outputs.max(1)
-                val_total += labels.size(0)
-                val_correct += predicted.eq(labels).sum().item()
+                epoch_val_total += labels.size(0)
+                epoch_val_correct += predicted.eq(labels).sum().item()
 
-        val_acc = 100. * val_correct / val_total
+        val_loss_epoch = epoch_val_loss / len(val_loader)
+        val_acc_epoch = 100.0 * epoch_val_correct / epoch_val_total
+
+        val_losses.append(val_loss_epoch)
+        val_accuracies.append(val_acc_epoch)
+
+        # ------------------------------
+        #   OPTIONAL: SMOOTHING ACCURACY
+        # ------------------------------
+        # If you have a separate measure for "smoothing clean accuracy," compute it here.
+        # We'll just set it to val_acc_epoch as a placeholder:
+        smoothing_acc_epoch = val_acc_epoch
+        smoothing_accuracies.append(smoothing_acc_epoch)
+
+        # ------------------------------
+        #   OPTIONAL: ROBUST ACCURACY
+        # ------------------------------
+        val_correct_adv = 0
+        val_total_adv = 0
+
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            # Generate adversarial examples WITHOUT torch.no_grad()
+            adv_inputs = []
+            for i, label in enumerate(labels):
+                possible_targets = [c for c in range(num_classes) if c != label.item()]
+                target = random.choice(possible_targets)
+                adv_example = attack.CW_ATTACK(inputs[i].unsqueeze(0), target)
+                adv_inputs.append(adv_example.squeeze(0))
+            
+            adv_inputs = torch.stack(adv_inputs).to(device)
+            
+            # Now, use torch.no_grad() for the model inference on adversarial examples.
+            with torch.no_grad():
+                outputs_adv = model(adv_inputs)
+                _, predicted_adv = outputs_adv.max(1)
+            
+            val_total_adv += labels.size(0)
+            val_correct_adv += predicted_adv.eq(labels).sum().item()
+
+        val_acc_robust_epoch = 100.0 * val_correct_adv / val_total_adv
+        robust_accuracies.append(val_acc_robust_epoch)
+
 
         logger.info(f'Epoch {epoch+1}/{num_epochs}:')
-        logger.info(f'Train Loss: {train_loss/len(train_loader):.4f}, Train Acc: {train_acc:.2f}%')
-        logger.info(f'Val Loss: {val_loss/len(val_loader):.4f}, Val Acc: {val_acc:.2f}%')
+        logger.info(f'  Train Loss: {train_loss_epoch:.4f}, Train Acc: {train_acc_epoch:.2f}%')
+        logger.info(f'  Val   Loss: {val_loss_epoch:.4f},   Val Acc: {val_acc_epoch:.2f}%')
+        logger.info(f'  Robust Val Acc: {val_acc_robust_epoch:.2f}%')
 
-        # Save the best model based on validation accuracy.
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        # ----------------------
+        #  SAVE BEST MODEL, ETC.
+        # ----------------------
+        if val_acc_epoch > best_val_acc:
+            best_val_acc = val_acc_epoch
             torch.save(model.state_dict(), 'outputs/checkpoints/best_model.pth')
-            logger.info(f'New best model saved with accuracy {val_acc:.2f}%')
+            logger.info(f'New best model saved with accuracy {val_acc_epoch:.2f}%')
 
-        # Save model at every epoch.
         torch.save(model.state_dict(), f'outputs/checkpoints/model_epoch_{epoch+1}.pth')
+
+        # -------------------------------------------------
+        #  PLOT METRICS (UP TO CURRENT EPOCH) & SAVE TO PNG
+        # -------------------------------------------------
+        fig = make_subplots(
+            rows=2, 
+            cols=2, 
+            subplot_titles=(
+                "Clean Loss", 
+                "Clean Accuracy", 
+                "Smoothing Clean Accuracy", 
+                "Robust Accuracy"
+            )
+        )
+
+        epochs_range = list(range(1, epoch + 2))  # up to current epoch
+
+        # 1) Clean Loss
+        fig.add_trace(
+            go.Scatter(
+                x=epochs_range, 
+                y=train_losses, 
+                mode='lines+markers', 
+                name='Clean Loss'
+            ), 
+            row=1, col=1
+        )
+
+        # 2) Clean Accuracy
+        fig.add_trace(
+            go.Scatter(
+                x=epochs_range, 
+                y=val_accuracies, 
+                mode='lines+markers', 
+                name='Clean Accuracy'
+            ), 
+            row=1, col=2
+        )
+
+        # 3) Smoothing Clean Accuracy
+        fig.add_trace(
+            go.Scatter(
+                x=epochs_range, 
+                y=smoothing_accuracies, 
+                mode='lines+markers', 
+                name='Smoothing Clean Acc'
+            ), 
+            row=2, col=1
+        )
+
+        # 4) Robust Accuracy
+        fig.add_trace(
+            go.Scatter(
+                x=epochs_range, 
+                y=robust_accuracies, 
+                mode='lines+markers', 
+                name='Robust Accuracy'
+            ), 
+            row=2, col=2
+        )
+
+        fig.update_layout(
+            title="Évolution des métriques d'entraînement (up to Epoch {})".format(epoch+1),
+            height=800, 
+            width=1000
+        )
+
+        # Save the figure for this epoch
+        fig.write_image(f"outputs/training_metrics_epoch_{epoch+1}.png")
+        logger.info(f"Saved training metrics figure to outputs/training_metrics_epoch_{epoch+1}.png")
+    
+    # (Optional) You could also create a final plot after all epochs if desired.
+    # For example, to see the entire training in one figure:
+    # final_fig = make_subplots(...)
+    # ... add traces ...
+    # final_fig.write_image("outputs/training_metrics_final.png")
+
+
 
 class SpeechCommandsDataset(Dataset):
     """Dataset pour Speech Commands."""

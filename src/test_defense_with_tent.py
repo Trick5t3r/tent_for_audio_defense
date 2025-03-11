@@ -72,19 +72,6 @@ class ASRAttacks:
     def CW_ATTACK(self, audio, target, c=1.0, kappa=0, num_iter=500, learning_rate=0.001, targeted=True, early_stop=True):
         """
         Perform the Carlini-Wagner (CW) attack.
-
-        Args:
-            audio (torch.Tensor): Input audio tensor.
-            target (list): Target transcription.
-            c (float): Trade-off constant between perturbation norm and attack objective.
-            kappa (float): Confidence parameter. Higher values enforce stronger misclassification.
-            num_iter (int): Number of optimization iterations.
-            learning_rate (float): Learning rate for gradient descent.
-            targeted (bool): Whether the attack is targeted.
-            early_stop (bool): Whether to stop early if the attack succeeds.
-
-        Returns:
-            torch.Tensor: Adversarial audio tensor.
         """
         # Move audio to device and clone original input.
         audio = audio.to(self.device)
@@ -93,8 +80,8 @@ class ASRAttacks:
         # Convert target transcription to a label index.
         target_tensor = torch.tensor([self.labels.index(t) for t in target], device=self.device)
         target_label = target_tensor.item()  # Assume single target for now.
-
-        # Initialize the perturbation delta (starting at zero).
+        
+        # Initialize the perturbation delta with gradients enabled.
         delta = torch.zeros_like(audio, requires_grad=True)
         
         # Use an optimizer to update delta.
@@ -103,38 +90,36 @@ class ASRAttacks:
         for i in range(num_iter):
             optimizer.zero_grad()
             
-            # Create the adversarial example and ensure it stays within valid bounds.
-            adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
+            # Compute adversarial audio WITHOUT clamping in the forward pass.
+            adv_audio = original_audio + delta
             
-            # Obtain the logits from the model.
+            # Get logits from the model.
             logits = self.model(adv_audio)
-            # Squeeze extra dimensions if needed (assume single sample).
             if logits.dim() > 1:
                 logits = logits.squeeze(0)
             
-            # For CW, define the attack loss term f. For a targeted attack, we want the target logit 
-            # to be higher than all others by a margin. For an untargeted attack, we want the target logit 
-            # to fall behind the highest non-target logit.
+            # Compute the CW loss.
             target_logit = logits[target_label]
-            # Exclude the target class from the others.
             other_logits = torch.cat([logits[:target_label], logits[target_label+1:]])
             max_other_logit = torch.max(other_logits)
             
             if targeted:
-                # For targeted attack, encourage target_logit to exceed others.
                 f_val = torch.clamp(max_other_logit - target_logit, min=-kappa)
             else:
-                # For untargeted attack, encourage target_logit to be lower than the maximum other logit.
                 f_val = torch.clamp(target_logit - max_other_logit, min=-kappa)
             
-            # The overall loss combines the ℓ₂ norm of the perturbation and the attack objective.
+            # Loss: ℓ₂ norm of the perturbation plus the attack objective.
             loss = torch.norm(delta)**2 + c * f_val
             
+            # Backpropagate. (No need for retain_graph unless you plan to reuse the graph.)
             loss.backward()
             optimizer.step()
             
-            # Optionally, early stop if the attack objective is met.
+            # Project delta so that the adversarial audio is within valid bounds.
             with torch.no_grad():
+                delta.copy_(torch.clamp(original_audio + delta, min=-1, max=1) - original_audio)
+                
+                # Early stop check using clamped adversarial audio.
                 adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
                 logits = self.model(adv_audio)
                 if logits.dim() > 1:
@@ -148,9 +133,10 @@ class ASRAttacks:
                         print(f"Early stop at iteration {i}")
                         break
 
-        # Return the final adversarial audio, ensuring it is on the CPU.
+        # Return the final adversarial audio (clamped to valid bounds) on CPU.
         adv_audio = torch.clamp(original_audio + delta, min=-1, max=1)
         return adv_audio.cpu()
+
     
     def MIM_ATTACK(self, audio, target, epsilon=0.0015, alpha=0.00009, num_iter=500, targeted=True, early_stop=True, mu=1.0):
         """
