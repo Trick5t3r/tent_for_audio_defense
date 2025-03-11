@@ -150,7 +150,7 @@ def evaluate(input_audio, target, dent_on=False, num_iter=500):
     # Load the model
     logger.info("Chargement du modèle...")
     model = CNN(batch_norm=True, num_classes=3)
-    chemin_du_modele = 'outputs/checkpoints/model_epoch_6.pth'
+    chemin_du_modele = 'outputs/checkpoints/model_epoch_30.pth'
     model.load_state_dict(torch.load(chemin_du_modele))
     logger.info("Modèle chargé avec succès")
     

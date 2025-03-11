@@ -31,3 +31,7 @@ tqdm
 typing_extensions
 Werkzeug
 yacs
+pandas
+matplotlib
+plotly
+nbformat
