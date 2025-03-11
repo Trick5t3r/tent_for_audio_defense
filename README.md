@@ -150,3 +150,5 @@ https://github.com/dataflowr/Project-Tent-Test-Time-Domain-Adaptation?tab=readme
 http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz
 
 https://github.com/hammaad2002/ASRAdversarialAttacks.git
+
+https://github.com/yaircarmon/semisup-adv
